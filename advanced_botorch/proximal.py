@@ -3,7 +3,7 @@ from torch.distributions.multivariate_normal import MultivariateNormal
 from botorch.acquisition import acquisition 
 
 class ProximalAcqusitionFunction(acquisition.AcquisitionFunction):
-    def __init__(self, model, sigma_matrix):
+    def __init__(self, model, sigma_matrix, scale_to_gp = False):
         '''
         Acquisition function that biases other acquistion functions towards a
         nearby region in input space
@@ -22,18 +22,32 @@ class ProximalAcqusitionFunction(acquisition.AcquisitionFunction):
         super().__init__(model)
 
         self.register_buffer('sigma_matrix', sigma_matrix)
+        self.scale_to_gp = scale_to_gp
 
+
+        
     def forward(self, X):
         #get the last point in the training set (assumed to be the most
         #recently evaluated point)
         last_pt = self.model.train_inputs[0][-1].double()
-
+        #print(self.model.train_inputs)
+        #print(last_pt)
+        #print(X)
+        #L = self.model.covar_module.outputscale
+        #dist = torch.linalg.norm((X - last_pt) / L , dim = 0)
         
         #define multivariate normal
-        d = MultivariateNormal(last_pt, self.sigma_matrix.double())
+        #if self.scale_to_gp:
+        #    sm = torch.matmul(,self.sigma_matrix)
+        #else:
+        sm = self.sigma_matrix
+            
+        d = MultivariateNormal(last_pt, sm.double())
 
         #use pdf to calculate the weighting - normalized to 1 at the last point
         norm = torch.exp(d.log_prob(last_pt).flatten())
         weight = torch.exp(d.log_prob(X).flatten()) / norm
+
+        #weight = 1 - dist
         
         return weight

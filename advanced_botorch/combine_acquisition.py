@@ -18,11 +18,6 @@ class MultiplyAcquisitionFunction(botorch.acquisition.acquisition.AcquisitionFun
 
         super().__init__(model)
 
-        #check to make sure that all of the acquisition_functions are using the same
-        #model
-        for function in acquisition_functions:
-            assert self.model is function.model
-        
         self.acqisition_functions = acquisition_functions
 
     def forward(self, X):

@@ -7,7 +7,7 @@ from botorch.utils.transforms import t_batch_mode_transform
 
 
 class ConstrainedAcquisitionFunction(acquisition.AcquisitionFunction):
-    def __init__(self, model, constraints, objective_index):
+    def __init__(self, model, constraints):
         '''
         Acquisition function that biases away from points that were observed 
         to not satisfy a given constraint.
@@ -15,7 +15,7 @@ class ConstrainedAcquisitionFunction(acquisition.AcquisitionFunction):
         Arguments
         ---------
         model : model
-            A fitted model
+            A fitted model, usually seperate from objective models
 
         constraints: dict 
             A dictionary of the form `{i: [lower, upper]}`, where
@@ -30,7 +30,6 @@ class ConstrainedAcquisitionFunction(acquisition.AcquisitionFunction):
         self.constraints = constraints
         
         super().__init__(model)
-        self.objective_index = objective_index
         self._preprocess_constraint_bounds(constraints = constraints)
 
     @t_batch_mode_transform(expected_q=1)
@@ -57,10 +56,6 @@ class ConstrainedAcquisitionFunction(acquisition.AcquisitionFunction):
         con_indices = list(constraints.keys())
         if len(con_indices) == 0:
             raise ValueError("There must be at least one constraint.")
-        if self.objective_index in con_indices:
-            raise ValueError(
-                "Output corresponding to objective should not be a constraint."
-            )
         for k in con_indices:
             if constraints[k][0] is not None and constraints[k][1] is not None:
                 if constraints[k][1] <= constraints[k][0]:

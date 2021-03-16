@@ -16,7 +16,7 @@ import sys, os
 import sys, os
 sys.path.append('\\'.join(os.getcwd().split('\\')[:-1]))
 
-from advanced_botorch import binary_constraint
+from advanced_botorch import constrained2
 from advanced_botorch import proximal
 from advanced_botorch import combine_acquisition
 
@@ -30,33 +30,35 @@ import training
 
 
 def main():
-    sigma_mult = [0.1**2, 0.5**2]
+    #demonstrate difference due to proximal addition
+        
+    #constraints = [{1:[0.0,0.4]},{1:[0.0,0.4]}]
+    constraint = {0:[-0.5, 0.5]}
+    
+    #sigma_matrix_on = torch.eye(2) * 0.5
+    #sigma_matrix_off = torch.eye(2) * 1.0
+    #matricies = [sigma_matrix_on, sigma_matrix_off]
+    sigma_mult = [0.25**2]
+    
+    #need to create a scalarized objective object for BoTorch
     
     n_init = 5
     x_init = torch.rand(n_init, 2)*0.5 + 0.25
 
 
     fig,ax = plt.subplots(len(sigma_mult),1)
-    fig2,ax2 = plt.subplots()
-
-    if isinstance(ax,np.ndarray):
-        for a in ax.flatten():
-            a.set_ylim(0,1)
-            a.set_xlim(0,1)
-            a.set_aspect('equal')
-            
-    else:
-        ax.set_ylim(0,1)
-        ax.set_xlim(0,1)
+    fig2, ax2 = plt.subplots()
+    #for a in ax:
+    ax.set_ylim(0,1)
+    ax.set_xlim(0,1)
     
     for i in range(len(sigma_mult)):
-        X, Y, mlls, cmlls = optimize(x_init, 35, torch.eye(2) * sigma_mult[i])
-        ax[i].plot(X[:,0][:n_init], X[:,1][:n_init],'+C0')
-        ax[i].plot(X[:,0][n_init:], X[:,1][n_init:],'-C1')
-        ax[i].plot(X[:,0][-1], X[:,1][-1],'oC1')
+        X, Y, mlls = optimize(x_init, 35, constraint, torch.eye(2) * sigma_mult[i])
+        ax.plot(X[:,0][:n_init], X[:,1][:n_init],'+C0')
+        ax.plot(X[:,0][n_init:], X[:,1][n_init:],'-C1')
+        ax.plot(X[:,0][-1], X[:,1][-1],'oC1')
         
-        ax2.plot(np.exp(mlls) / np.arange(1,len(mlls)+1) )
-        ax2.plot(np.exp(cmlls) / np.arange(1,len(cmlls)+1) )
+        #ax2.plot(mlls / np.arange(1,len(mlls)+1) )
     
 
 def f(X):
@@ -81,12 +83,11 @@ def f(X):
     return result
 
 
-def optimize(x_initial, n_steps, sigma_matrix):
+def optimize(x_initial, n_steps, constraint, sigma_matrix):
     train_X = x_initial
     train_Y = f(train_X)
 
     mlls = []
-    cmlls = []
     for i in range(n_steps):
         print(i)
 
@@ -95,34 +96,49 @@ def optimize(x_initial, n_steps, sigma_matrix):
         mll_val = fit_gp(gp)
         mlls += [mll_val]
 
-        #define constraint GP
+        #lk = gpytorch.likelihoods.GaussianLikelihood()
+        #cgp = models.NNManifoldGPModel(train_X, train_Y[:,1], lk)
+        #cgp = models.ExactGPModel(train_X, train_Y[:,1].reshape(-1,1), lk)
         cgp = SingleTaskGP(train_X, train_Y[:,1].reshape(-1,1))
-        cmll_val = fit_gp(cgp)
-        cmlls += [cmll_val]
+        
+        fit_gp(cgp)
+        #define gp model for constraints(s) - using Bernoulli likelihood
+        #cgp = models.GPClassificationModel(train_X)
+
+        #enforce a prior mean of 1
+        #cgp.mean_module.constant.data = torch.ones(1)
+        #cgp.mean_module.constant.requires_grad = False
+        #lk = gpytorch.likelihoods.BernoulliLikelihood()
+        #training.train_exact_model(cgp, lk, train_X,
+        #train_Y[:,1],
+        #verbose = False)
+
+        #print(cgp.state_dict())
+        
         #get candidate for observation and add to training data
-        if i % 10 == 0:
+        if i % 5 == 0:
             plot = True
         else:
             plot = False
             
-        candidate = max_acqf(gp, cgp, sigma_matrix, plot = plot)
+        candidate = max_acqf(gp, cgp, constraint, sigma_matrix, plot = plot)
         train_X = torch.cat((train_X, candidate))
         train_Y = f(train_X)
 
     #plot_model(cgp, lk, train_X)
         
-    candidate = max_acqf(gp, cgp, sigma_matrix, plot = True)
+    candidate = max_acqf(gp, cgp, constraint, sigma_matrix, plot = True)
     print(gp.covar_module.base_kernel.lengthscale)
     print(cgp.covar_module.base_kernel.lengthscale)
 
-    return train_X, train_Y, np.array(mlls), np.array(cmlls)
+    return train_X, train_Y, np.array(mlls)
 
     
 
-def max_acqf(gp, cgp, sigma_matrix, plot = False):
+def max_acqf(gp, cgp, constraint, sigma_matrix, plot = False):
     #finds new canidate point based on EHVI acquisition function
 
-    constr = binary_constraint.BinaryConstraint(cgp)
+    constr = constrained2.ConstrainedAcquisitionFunction(cgp)
     #constr = PosteriorMean(cgp)
     prox = proximal.ProximalAcqusitionFunction(gp, sigma_matrix)
     UCB = UpperConfidenceBound(gp, beta = 1e6)
@@ -148,11 +164,11 @@ def fit_gp(gp):
 
     train_x = gp.train_inputs[0]
     train_y = gp.train_targets.reshape(-1,1)
-    
-    mll = fit_gpytorch_model(mll)
 
-    gp.train()
-    mll_val = mll(gp(train_x), train_y.flatten())
+    mll = fit_gpytorch_model(mll)
+    #mll_val = mll(gp(train_x), train_y)
+    mll_val = None
+    
     return mll_val
     
 

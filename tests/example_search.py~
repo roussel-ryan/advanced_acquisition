@@ -29,10 +29,12 @@ import training
 
 
 def main():
-    sigma_mult = [0.1**2, 0.5**2]
+    #sigma_mult = [0.5**2]
+    sigma_mult = [0.2**2]
     
-    n_init = 5
-    x_init = torch.rand(n_init, 2)*0.5 + 0.25
+    n_init = 1
+    #x_init = torch.rand(n_init, 2)
+    x_init = torch.tensor((0.5,0.4)).reshape(1,-1)
 
 
     fig,ax = plt.subplots(len(sigma_mult),1)
@@ -47,11 +49,13 @@ def main():
     else:
         ax.set_ylim(0,1)
         ax.set_xlim(0,1)
-    
+        ax.set_aspect('equal')
+        ax = [ax]
+        
     for i in range(len(sigma_mult)):
-        X, Y, mlls, cmlls = optimize(x_init, 35, torch.eye(2) * sigma_mult[i])
+        X, Y, mlls, cmlls = optimize(x_init, 45, torch.eye(2) * sigma_mult[i])
         ax[i].plot(X[:,0][:n_init], X[:,1][:n_init],'+C0')
-        ax[i].plot(X[:,0][n_init:], X[:,1][n_init:],'-C1')
+        ax[i].plot(X[:,0][n_init:], X[:,1][n_init:],'+C1')
         ax[i].plot(X[:,0][-1], X[:,1][-1],'oC1')
         
         ax2.plot(np.exp(mlls) / np.arange(1,len(mlls)+1) )
@@ -62,13 +66,16 @@ def f(X):
     #Y = 1 - (X - 0.5).norm(dim=-1, keepdim=True)  # explicit output dimension
     #Y += 0.1 * torch.rand_like(Y)
     #Y = (Y - Y.mean()) / Y.std()
-    mean = torch.tensor((0.4,0.4))
-    sigma = torch.eye(2)
-    sigma[0, 0] = 1.0**2
-    sigma[1, 1] = 0.25**2
-    d = MultivariateNormal(mean, sigma)
-    Y = torch.exp(d.log_prob(X)) / torch.exp(d.log_prob(mean))
+    #mean = torch.tensor((0.4,0.4))
+    #sigma = torch.eye(2)
+    #sigma[0, 0] = 1.0**2
+    #sigma[1, 1] = 0.25**2
+    #d = MultivariateNormal(mean, sigma)
+    #Y = torch.exp(d.log_prob(X)) / torch.exp(d.log_prob(mean))
 
+    Y = torch.sin(2.0 * np.pi * X[:,0]) * torch.sin(np.pi * X[:,1])
+
+    
     #second index serves as the constraint
     #C = X[:,0].numpy() < 0.75
     C = np.all(np.vstack(((X[:,0] - 0.5)**2 + (X[:,1] - 0.5)**2 < 0.35**2,
@@ -100,7 +107,7 @@ def optimize(x_initial, n_steps, sigma_matrix):
         cmlls += [cmll_val]
         #get candidate for observation and add to training data
         if i % 10 == 0:
-            plot = True
+            plot = False
         else:
             plot = False
             
@@ -109,7 +116,9 @@ def optimize(x_initial, n_steps, sigma_matrix):
         train_Y = f(train_X)
 
     #plot_model(cgp, lk, train_X)
-        
+
+    plot_func(train_X)
+    
     candidate = max_acqf(gp, cgp, sigma_matrix, plot = True)
     print(gp.covar_module.base_kernel.lengthscale)
     print(cgp.covar_module.base_kernel.lengthscale)
@@ -126,13 +135,14 @@ def max_acqf(gp, cgp, sigma_matrix, plot = False):
     prox = proximal.ProximalAcqusitionFunction(gp, sigma_matrix)
     UCB = UpperConfidenceBound(gp, beta = 1e6)
     comb = combine_acquisition.MultiplyAcquisitionFunction(gp, [constr, prox, UCB])
+    #comb = combine_acquisition.MultiplyAcquisitionFunction(gp, [UCB])
     
     bounds = torch.stack([torch.zeros(2), torch.ones(2)])
 
     if plot:
-        #plot_acq(comb, bounds.numpy().T, gp.train_inputs[0])
+        plot_acq(comb, bounds.numpy().T, gp.train_inputs[0])
         plot_acq(constr, bounds.numpy().T, gp.train_inputs[0])
-        #plot_acq(UCB, bounds.numpy().T, gp.train_inputs[0])
+        plot_acq(UCB, bounds.numpy().T, gp.train_inputs[0])
         
     candidate, acq_value = optimize_acqf(
         comb, bounds = bounds, q = 1, num_restarts = 10, raw_samples = 20)
@@ -173,10 +183,36 @@ def plot_model(model, lk, obs):
 
     fig.colorbar(c)
 
+def plot_func(obs):
+    fig1, ax1 = plt.subplots()
+    fig2, ax2 = plt.subplots()
+    axes = [ax1,ax2]
+    figs = [fig1,fig2]
+    
+    n = 50
+    x = [np.linspace(0, 1, n) for e in [0,1]]
+    xx,yy = np.meshgrid(*x)
+    pts = np.vstack((xx.ravel(), yy.ravel())).T
+    pts = torch.from_numpy(pts).float()
+
+    
+    for i in [0,1]:
+        f_val = f(pts)[:,i]
+
+        ax = axes[i]
+        fig = figs[i]
+        c = ax.pcolor(xx,yy,f_val.detach().reshape(n,n))
+        ax.plot(*obs.detach().numpy().T,'-C1', marker = 'o')
+        ax.set_ylabel('x2')
+        ax.set_xlabel('x1')
+        ax.set_aspect('equal')
+        fig.colorbar(c)
+
+        
 def plot_acq(func, bounds, obs):
     fig, ax = plt.subplots()
 
-    n = 25
+    n = 50
     x = [np.linspace(*bnds, n) for bnds in bounds]
     xx,yy = np.meshgrid(*x)
     pts = np.vstack((xx.ravel(), yy.ravel())).T
@@ -188,7 +224,7 @@ def plot_acq(func, bounds, obs):
     for i in range(pts.shape[0]):
         f[i] = func(pts[i].reshape(1,-1))
     c = ax.pcolor(xx,yy,f.detach().reshape(n,n))
-    ax.plot(*obs.detach().numpy().T,'+')
+    ax.plot(*obs.detach().numpy().T,'oC1')
 
     ax.set_title(type(func))
     fig.colorbar(c)
